@@ -2,16 +2,19 @@
 Stock Analyzer
 Enter a stock name, get a comprehensive AI-powered investment analysis.
 Data is scraped from both Screener.in and Trendlyne automatically.
+PDFs of all scraped data are provided for download.
 """
 
 import streamlit as st
 from scraper import (
     search_company as screener_search,
     scrape_company_data as screener_scrape,
+    export_to_pdf as screener_pdf,
 )
 from trendlyne_scraper import (
     search_trendlyne,
     scrape_trendlyne_data,
+    export_to_pdf as trendlyne_pdf,
 )
 from analyzer import analyze_stock
 
@@ -42,6 +45,7 @@ if st.button("Analyze", type="primary"):
     # ── Step 1: Search & resolve the stock on both sources ──────────
     screener_data = None
     trendlyne_data = None
+    stock_symbol = query.upper()
 
     with st.status("Fetching data from Screener.in and Trendlyne...", expanded=False) as status:
         # --- Screener.in ---
@@ -51,9 +55,9 @@ if st.button("Analyze", type="primary"):
             if results:
                 selected = results[0]
                 parts = selected["url"].strip("/").split("/")
-                symbol = parts[1] if len(parts) >= 2 else query.upper()
+                stock_symbol = parts[1] if len(parts) >= 2 else query.upper()
                 st.write(f"Fetching Screener data for {selected['name']}...")
-                screener_data = screener_scrape(symbol)
+                screener_data = screener_scrape(stock_symbol)
                 st.write(f"Got {len(screener_data)} sections from Screener.in")
             else:
                 st.write("No results on Screener.in")
@@ -70,6 +74,7 @@ if st.button("Analyze", type="primary"):
                 trendlyne_data = scrape_trendlyne_data(
                     sel["stock_id"], sel["symbol"], sel["slug"],
                 )
+                stock_symbol = sel["symbol"]
                 st.write(f"Got {len(trendlyne_data)} sections from Trendlyne")
             else:
                 st.write("No results on Trendlyne")
@@ -82,7 +87,18 @@ if st.button("Analyze", type="primary"):
         st.error("Could not fetch data from either source. Try a different stock name.")
         st.stop()
 
-    # ── Step 2: Merge data and run analysis ─────────────────────────
+    # Save to session state
+    st.session_state["screener_data"] = screener_data
+    st.session_state["trendlyne_data"] = trendlyne_data
+    st.session_state["stock_symbol"] = stock_symbol
+
+    # ── Step 2: Generate PDFs ─────────────────────────────────────
+    if screener_data:
+        st.session_state["screener_pdf"] = screener_pdf(screener_data)
+    if trendlyne_data:
+        st.session_state["trendlyne_pdf"] = trendlyne_pdf(trendlyne_data)
+
+    # ── Step 3: Merge data and run analysis ────────────────────────
     combined = {}
     if screener_data:
         for k, v in screener_data.items():
@@ -106,6 +122,36 @@ if st.button("Analyze", type="primary"):
         except Exception as e:
             st.error(f"Analysis failed: {e}")
 
+# ── Display results (persisted in session state) ──────────────────
+if "screener_data" in st.session_state or "trendlyne_data" in st.session_state:
+    sym = st.session_state.get("stock_symbol", "STOCK")
+
+    # PDF downloads
+    st.divider()
+    st.subheader("Download Data PDFs")
+    col1, col2 = st.columns(2)
+
+    if "screener_pdf" in st.session_state:
+        with col1:
+            st.download_button(
+                label=f"Screener.in PDF ({sym})",
+                data=st.session_state["screener_pdf"],
+                file_name=f"{sym}_screener_data.pdf",
+                mime="application/pdf",
+                type="primary",
+            )
+
+    if "trendlyne_pdf" in st.session_state:
+        with col2:
+            st.download_button(
+                label=f"Trendlyne PDF ({sym})",
+                data=st.session_state["trendlyne_pdf"],
+                file_name=f"{sym}_trendlyne_data.pdf",
+                mime="application/pdf",
+                type="primary",
+            )
+
+# Analysis
 if "analysis" in st.session_state:
     st.divider()
     st.subheader("Investment Analysis")
